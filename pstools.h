@@ -181,7 +181,7 @@ class trajectory {
 
     while (it != this->end()) {
       it = std::adjacent_find(it, this->end(), [&x](PSpoint cur, PSpoint next) {
-        return (cur.x < x) && (next.x > x);
+        return (cur.x < x) && (next.x >= x);
       });
       if (it != this->end()) {
         // At this point the it marks the first of the two PSpoints where
@@ -241,6 +241,30 @@ class trajectory {
 
     return areas;
   }
+
+  double loop_area_average(double x, double discard_percentage)
+  // Return the average of revolution areas, calculated over the last
+  // T.size()*(1-discard_percentage revolutions)
+  //
+  // A single -1 in the vector indicates that the system has never crossed the
+  // section This can be most likely due to some kind of confinement or
+  // overdamping.
+  {
+    std::vector<double> areas = this->loop_areas(x);
+
+    int n_areas = areas.size();
+
+    if ((n_areas == 1) && (areas[0] == -1.)) return -1.;
+
+    int head = int(std::round(discard_percentage * n_areas));
+
+    auto beg = areas.begin() + head;
+
+    double n_avg = std::distance(beg, areas.end());
+
+    return std::accumulate(beg, areas.end(), 0.0) / n_avg;
+  }
+
 
   double loop_area_asymptote(double x, double discard_percentage)
   // Return the asymptotic estimate of the area per loop, discarding a
