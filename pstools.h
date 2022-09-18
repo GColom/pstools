@@ -8,6 +8,18 @@
 #include <numeric>
 #include <vector>
 
+template<typename T> inline
+
+int signum(T x) {return (x > T(0)) - (x <  T(0));}
+
+template<typename T>
+
+auto midpoint(std::vector<T> time_series)
+{
+  auto mid = time_series.size()/2;
+  return time_series.begin() + mid;
+}
+
 static int timeprecision =
     8;  // 8 is the RADAR5 output precision for the time variable.
 static int PSprecision =
@@ -268,25 +280,64 @@ class trajectory {
 
   double loop_area_asymptote(double x, double discard_percentage)
   // Return the asymptotic estimate of the area per loop, discarding a
-  // percentage of the initial areas.
+  // percentage of the initial areas. The estimate is carried out via two
+  // successive analytical least squares fits.
+  // 
+  // The fit is performed onto a function f(x) = A - B exp(-Cx), the return
+  // of the function is a vector containing A, B and C in this order.
   //
   // A single -1 in the vector indicates that the system has never crossed the
   // section This can be most likely due to some kind of confinement or
   // overdamping.
   {
-    std::vector<double> areas = this->loop_areas(x);
+    std::vector<double> y = this->loop_areas(x);
 
-    int n_areas = areas.size();
+    int n_areas = y.size();
 
-    if ((n_areas == 1) && (areas[0] == -1.)) return -1.;
+    if ((n_areas == 1) && (y[0] == -1.)) return -1.;
 
-    int head = int(std::round(discard_percentage * n_areas));
+    int offset = int(std::round(discard_percentage * n_areas));
 
-    auto beg = areas.begin() + head;
+    auto beg = y.begin() + offset;
 
-    double n_avg = std::distance(beg, areas.end());
+    double n_records = std::distance(beg, y.end());
 
-    return std::accumulate(beg, areas.end(), 0.0) / n_avg;
+    std::vector<double> log_deltas(n_records-1, 0.);
+
+    int trend = signum(*y.end()-*midpoint(y));
+
+    std::cout<<trend<<std::endl;
+
+    std::adjacent_difference(beg, y.end(), log_deltas.begin(), [](double a, double b){return std::log(std::abs(b-a));});
+
+    double x_square_avg   = (n_areas*(n_areas+1)*(2*n_areas+1) - offset*(offset+1)*(2*offset+1))/(6*n_records);
+    double x_avg          = (n_areas*(n_areas+1) - offset*(offset+1))/(2*n_records);
+    double log_deltas_avg = std::accumulate(log_deltas.begin(), log_deltas.end(), 0.0)/(n_records-1);
+    double x_log_delta_cov     = 0.0;
+    
+    int x_it = offset;
+    for(auto it_log:log_deltas)
+    {
+      x_log_delta_cov += it_log * x_it / n_records;
+      x_it++;
+    }
+
+    double C = - (x_log_delta_cov - x_avg*log_deltas_avg)/(x_square_avg - x_avg*x_avg);
+    double log_D = (x_log_delta_cov/x_avg) + (x_square_avg * C)/x_avg;
+
+    double D = std::exp(log_D);
+    double B = D/C;
+
+    double y_avg = std::accumulate(beg, y.end(), 0.0) / n_records;
+    auto   exp_x = std::vector<double>(n_records, 0.0);
+
+    for(int i = offset; i < n_areas; ++i) exp_x[i] = std::exp(-C*i);
+
+    double exp_avg_x = std::accumulate(exp_x.begin(), exp_x.end(), 0.0)/n_records;
+
+    double A = B * exp_avg_x + y_avg;
+
+    return A;
   }
 };
 
